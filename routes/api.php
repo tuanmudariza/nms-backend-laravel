@@ -26,3 +26,6 @@ Route::get('/router-info', [MikrotikController::class, 'getRouterInfo']);
 Route::get('/mikrotik/pppoe-data', [MikrotikController::class, 'getPppoeData']);
 
 Route::get('/mikrotik/logs', [MikrotikController::class, 'getSystemLogs']);
+
+Route::post('/mikrotik/pppoe/kick', [MikrotikController::class, 'kickPppoeUser']);
+

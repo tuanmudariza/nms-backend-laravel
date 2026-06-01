@@ -146,9 +146,24 @@ public function getPppoeSecrets(Request $request)
 
         $activeUsers = array_column($actives, 'name');
 
-        // Ambil parameter pencarian dari Flutter nanti (kalau ada)
+        // Ambil dan bersihkan parameter search
         $search = $request->query('search');
-        $limit = $request->query('limit', 50); // Default batasi 50 data dulu biar Flutter gak berat
+        if ($search !== null) {
+            $search = trim(strip_tags($search)); // Bersihkan dari spasi liar dan tag HTML berbahaya
+        }
+
+        // Ambil dan paksa limit harus berupa angka bulat positif
+        $limit = $request->query('limit', 50); // Default 50 data
+        if (!is_numeric($limit) || (int)$limit <= 0) {
+            $limit = 50; // Kalau dikirim aneh-aneh (gajah, minus, dll), paksa balik ke 50
+        } else {
+            $limit = (int)$limit;
+        }
+        
+        // Batasi maksimal data yang boleh ditarik sekali hit biar server gak jebol
+        if ($limit > 100) {
+            $limit = 100; 
+        }
 
         $userList = [];
         foreach ($secrets as $secret) {
@@ -249,6 +264,51 @@ public function getPppoeSecrets(Request $request)
                     'uptime_seconds' => 0
                 ],
             ]
+        ], 200);
+    }
+}
+
+public function kickPppoeUser(Request $request)
+{
+    // Proteksi validasi input username dari Flutter
+    $request->validate([
+        'username' => 'required|string'
+    ]);
+
+    $username = $request->input('username');
+
+    try {
+        $client = $this->connectMikrotik();
+
+        // 1. Cari dulu ID di /ppp/active berdasarkan nama usernya
+        $queryFind = new \RouterOS\Query('/ppp/active/print');
+        $queryFind->where('name', $username);
+        $activeUsers = $client->query($queryFind)->read();
+
+        // 2. Kalau ketemu langsung kita kick!
+        if (!empty($activeUsers)) {
+            $userId = $activeUsers[0]['.id']; // Ambil internal ID MikroTik (misal: *1F)
+            
+            $queryRemove = new \RouterOS\Query('/ppp/active/remove');
+            $queryRemove->equal('.id', $userId);
+            $client->query($queryRemove)->read();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => "User {$username} berhasil ditendang dari router kantor!"
+            ], 200);
+        }
+
+        return response()->json([
+            'status' => 'error',
+            'message' => "User {$username} tidak ditemukan dalam daftar online."
+        ], 404);
+
+    } catch (\Exception $e) {
+        // Mode simulator tetap aman
+        return response()->json([
+            'status' => 'success',
+            'message' => "[Simulator] Sukses menendang user dummy {$username}."
         ], 200);
     }
 }
