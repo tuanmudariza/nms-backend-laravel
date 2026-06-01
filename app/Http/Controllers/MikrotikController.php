@@ -132,50 +132,70 @@ public function getTraffic()
     }
 }
 
-public function getPppoeSecrets()
+public function getPppoeSecrets(Request $request)
 {
     try {
-        // 1. Konek ke MikroTik pake fungsi andalan lo
         $client = $this->connectMikrotik();
 
-        // 2. Ambil data secret (daftar semua user PPPoE)
+        // 1. Ambil data secret & active secara real-time
         $querySecret = new \RouterOS\Query('/ppp/secret/print');
         $secrets = $client->query($querySecret)->read();
 
-        // 3. Ambil data active (user yang saat ini lagi online/konek)
         $queryActive = new \RouterOS\Query('/ppp/active/print');
         $actives = $client->query($queryActive)->read();
 
-        // Bikin list nama user yang lagi aktif biar gampang dicocokin
         $activeUsers = array_column($actives, 'name');
+
+        // Ambil parameter pencarian dari Flutter nanti (kalau ada)
+        $search = $request->query('search');
+        $limit = $request->query('limit', 50); // Default batasi 50 data dulu biar Flutter gak berat
 
         $userList = [];
         foreach ($secrets as $secret) {
-            $isOnline = in_array($secret['name'], $activeUsers);
+            $username = $secret['name'] ?? 'Unknown';
+
+            // Filter Pencarian: Kalau Flutter kirim query search, kita saring di sini
+            if ($search && stripos($username, $search) === false) {
+                continue;
+            }
+
+            $isOnline = in_array($username, $activeUsers);
             
             $userList[] = [
-                'username' => $secret['name'] ?? 'Unknown',
+                'username' => $username,
                 'profile'  => $secret['profile'] ?? 'default',
                 'service'  => $secret['service'] ?? 'pppoe',
                 'status'   => $isOnline ? 'Online' : 'Offline',
-                'uptime'   => $isOnline ? ($actives[array_search($secret['name'], $activeUsers)]['uptime'] ?? '00:00:00') : '-',
+                'uptime'   => $isOnline ? ($actives[array_search($username, $activeUsers)]['uptime'] ?? '00:00:00') : '-',
             ];
+        }
+
+        // Hitung total sebelum di-limit
+        $totalUsers = count($userList);
+        $totalOnline = count(array_filter($userList, fn($u) => $u['status'] === 'Online'));
+
+        // Potong data sesuai limit biar beban kerja Flutter enteng
+        if ($limit && $limit > 0) {
+            $userList = array_slice($userList, 0, $limit);
         }
 
         return response()->json([
             'status' => 'success',
-            'total_users' => count($userList),
-            'total_online' => count($actives),
+            'search_keyword' => $search ?? 'none',
+            'total_filtered' => count($userList),
+            'total_users_all' => $totalUsers,
+            'total_online_all' => $totalOnline,
             'data' => $userList
         ], 200);
 
     } catch (\Exception $e) {
-        // 4. MODE SIMULATOR (DUMMY): Biar lo berdua tetep bisa ngoding list & status di kosan
+        // MODE SIMULATOR (Tetap aman kalau lo lagi offline dari router kantor)
         return response()->json([
             'status' => 'success',
             'message' => 'Menggunakan Mode Simulator PPPoE.',
-            'total_users' => 5,
-            'total_online' => 3,
+            'total_filtered' => 5,
+            'total_users_all' => 5,
+            'total_online_all' => 3,
             'data' => [
                 ['username' => 'budi_net', 'profile' => '10Mbps_Unlim', 'service' => 'pppoe', 'status' => 'Online', 'uptime' => '05:23:12'],
                 ['username' => 'ani_speedy', 'profile' => '20Mbps_Unlim', 'service' => 'pppoe', 'status' => 'Online', 'uptime' => '12:01:45'],
