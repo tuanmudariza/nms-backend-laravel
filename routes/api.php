@@ -20,3 +20,9 @@ Route::get('/mikrotik/traffic', [MikrotikController::class, 'getTraffic']);
 
 // Jalur untuk melihat semua daftar pelanggan PPPoE ISP
 Route::get('/mikrotik/pppoe', [MikrotikController::class, 'getPppoeSecrets']);
+
+Route::get('/router-info', [MikrotikController::class, 'getRouterInfo']);
+
+Route::get('/mikrotik/pppoe-data', [MikrotikController::class, 'getPppoeData']);
+
+Route::get('/mikrotik/logs', [MikrotikController::class, 'getSystemLogs']);
