@@ -160,13 +160,19 @@ public function getPppoeSecrets(Request $request)
             }
 
             $isOnline = in_array($username, $activeUsers);
+            $rawUptime = $isOnline ? ($actives[array_search($username, $activeUsers)]['uptime'] ?? '0s') : '-';
             
+            // Jinakkan dulu uptime aneh mikrotik lewat fungsi helper kita
+            $parsedUptime = $this->parseMikrotikUptime($rawUptime);
+
             $userList[] = [
                 'username' => $username,
                 'profile'  => $secret['profile'] ?? 'default',
                 'service'  => $secret['service'] ?? 'pppoe',
                 'status'   => $isOnline ? 'Online' : 'Offline',
-                'uptime'   => $isOnline ? ($actives[array_search($username, $activeUsers)]['uptime'] ?? '00:00:00') : '-',
+                'uptime_raw' => $rawUptime, // Tetap tampilin yang asli buat jaga-jaga
+                'uptime'     => $parsedUptime['readable'], // Format rapi: "2 hari 19 jam 57 menit"
+                'uptime_seconds' => $parsedUptime['seconds'], // Angka murni detik: 244640
             ];
         }
 
@@ -197,11 +203,51 @@ public function getPppoeSecrets(Request $request)
             'total_users_all' => 5,
             'total_online_all' => 3,
             'data' => [
-                ['username' => 'budi_net', 'profile' => '10Mbps_Unlim', 'service' => 'pppoe', 'status' => 'Online', 'uptime' => '05:23:12'],
-                ['username' => 'ani_speedy', 'profile' => '20Mbps_Unlim', 'service' => 'pppoe', 'status' => 'Online', 'uptime' => '12:01:45'],
-                ['username' => 'kos_mahandraga', 'profile' => '50Mbps_VVIP', 'service' => 'pppoe', 'status' => 'Online', 'uptime' => '02:45:00'],
-                ['username' => 'joko_susanto', 'profile' => '10Mbps_Unlim', 'service' => 'pppoe', 'status' => 'Offline', 'uptime' => '-'],
-                ['username' => 'reza_gaming', 'profile' => '30Mbps_Home', 'service' => 'pppoe', 'status' => 'Offline', 'uptime' => '-'],
+                [
+                    'username' => 'budi_net', 
+                    'profile' => '10Mbps_Unlim', 
+                    'service' => 'pppoe', 
+                    'status' => 'Online', 
+                    'uptime_raw' => '05:23:12',
+                    'uptime' => '5 jam 23 menit', 
+                    'uptime_seconds' => 19392
+                ],
+                [
+                    'username' => 'ani_speedy', 
+                    'profile' => '20Mbps_Unlim', 
+                    'service' => 'pppoe', 
+                    'status' => 'Online', 
+                    'uptime_raw' => '12:01:45',
+                    'uptime' => '12 jam 1 menit', 
+                    'uptime_seconds' => 43305
+                ],
+                [
+                    'username' => 'kos_mahandraga', 
+                    'profile' => '50Mbps_VVIP', 
+                    'service' => 'pppoe', 
+                    'status' => 'Online', 
+                    'uptime_raw' => '2d02:45:00',
+                    'uptime' => '2 hari 2 jam 45 menit', 
+                    'uptime_seconds' => 182700
+                ],
+                [
+                    'username' => 'joko_susanto', 
+                    'profile' => '10Mbps_Unlim', 
+                    'service' => 'pppoe', 
+                    'status' => 'Offline', 
+                    'uptime_raw' => '-',
+                    'uptime' => '-', 
+                    'uptime_seconds' => 0
+                ],
+                [
+                    'username' => 'reza_gaming', 
+                    'profile' => '30Mbps_Home', 
+                    'service' => 'pppoe', 
+                    'status' => 'Offline', 
+                    'uptime_raw' => '-',
+                    'uptime' => '-', 
+                    'uptime_seconds' => 0
+                ],
             ]
         ], 200);
     }
@@ -252,6 +298,45 @@ public function getSystemLogs()
     }
 }
 
+private function parseMikrotikUptime($uptime)
+{
+    if (!$uptime || $uptime === '-') {
+        return ['readable' => '-', 'seconds' => 0];
+    }
 
+    // Inisialisasi angka awal
+    $days = 0; $hours = 0; $minutes = 0; $seconds = 0;
+
+    // Regex sakti buat nangkep format: w(week), d(day), h(hour), m(minute), s(second)
+    if (preg_match('/(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/', $uptime, $matches)) {
+        // Cari posisi kecocokan string MikroTik
+        // urutan regex: 1=w, 2=d, 3=h, 4=m, 5=s
+        $weeks   = !empty($matches[1]) ? (int)$matches[1] : 0;
+        $days    = !empty($matches[2]) ? (int)$matches[2] : 0;
+        $hours   = !empty($matches[3]) ? (int)$matches[3] : 0;
+        $minutes = !empty($matches[4]) ? (int)$matches[4] : 0;
+        $seconds = !empty($matches[5]) ? (int)$matches[5] : 0;
+
+        // Gabungkan minggu ke hari kalau ada
+        $days += $weeks * 7;
+    }
+
+    // Hitung total detik murni (sangat berguna buat anak frontend)
+    $totalSeconds = ($days * 86400) + ($hours * 3600) + ($minutes * 60) + $seconds;
+
+    // Bikin format teks Indonesia yang rapi dan enak dibaca di UI Mobile
+    $readableParts = [];
+    if ($days > 0) $readableParts[] = "{$days} hari";
+    if ($hours > 0) $readableParts[] = "{$hours} jam";
+    if ($minutes > 0) $readableParts[] = "{$minutes} menit";
+    if ($seconds > 0 && $days == 0) $readableParts[] = "{$seconds} detik"; // detik muncul kalau belum hitungan hari
+
+    $readableText = count($readableParts) > 0 ? implode(' ', $readableParts) : '0 detik';
+
+    return [
+        'readable' => $readableText,
+        'seconds'  => $totalSeconds
+    ];
+}
 
 }
